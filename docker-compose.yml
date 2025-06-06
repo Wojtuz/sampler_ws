@@ -20,7 +20,7 @@ services:
     volumes:
       - type: bind
         source: ./
-        target: /home/rex/raptor_ws
+        target: /home/rex/sampler_ws
         bind:
           create_host_path: true
       - type: bind
