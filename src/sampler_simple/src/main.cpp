@@ -53,6 +53,14 @@ private:
         response.axes[2].command_id = VESC_COMMAND_SET_DUTY;
         response.axes[2].set_value = msg->drill_action;     //0x82
     
+        response.servos[0].command_id = VESC_COMMAND_SET_POS;
+        response.servos[0].set_value = msg->container_degrees_0; //
+        
+        response.servos[1].command_id = VESC_COMMAND_SET_POS;
+        response.servos[1].set_value = msg->container_degrees_1; //
+
+        response.servos[2].command_id = VESC_COMMAND_SET_POS;
+        response.servos[2].set_value = msg->container_degrees_2; //
 
         //auto response = std_msgs::msg::String();
         //response.axes[0] = msg->drill_action;
