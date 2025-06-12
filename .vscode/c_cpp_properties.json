@@ -7,11 +7,14 @@
             },
             "includePath": [
                 "/opt/ros/jazzy/include/**",
-                "/usr/include/**"
+                "/usr/include/**",
+                "${workspaceFolder}/install/rex_interfaces/include/rex_interfaces"
             ],
             "name": "ROS",
             "intelliSenseMode": "gcc-x64",
-            "compileCommands": "build/compile_commands.json",
+            "compileCommands": [
+                "build/compile_commands.json"
+            ],
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "gnu11",
             "cppStandard": "c++14"
