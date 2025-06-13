@@ -8,7 +8,8 @@
             "includePath": [
                 "/opt/ros/jazzy/include/**",
                 "/usr/include/**",
-                "${workspaceFolder}/install/rex_interfaces/include/rex_interfaces"
+                "${workspaceFolder}/install/rex_interfaces/include/rex_interfaces",
+                "${workspaceFolder}/src/sampler_simple/include"
             ],
             "name": "ROS",
             "intelliSenseMode": "gcc-x64",

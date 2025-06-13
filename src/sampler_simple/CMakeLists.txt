@@ -17,6 +17,8 @@ find_package(libVescCan REQUIRED)
 # Executable
 add_executable(sampler_simple_node 
   src/main.cpp
+  src/SamplerNode.cpp
+  src/SamplerSignalGenerator.cpp
 )
 
 ament_target_dependencies(sampler_simple_node
