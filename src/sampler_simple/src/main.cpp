@@ -40,39 +40,49 @@ private:
     void control_callback(const rex_interfaces::msg::ProbeControl::SharedPtr msg) const
     {
         printf("I received a message\n");
-        printf("ProbeControl: %f\n",
-               msg->container_degrees_0);
 
         auto response = rex_interfaces::msg::SamplerControl();
+
         response.axes[0].command_id = VESC_COMMAND_SET_DUTY;
-        response.axes[0].set_value = msg->platform_movement;     //0x80
-
         response.axes[1].command_id = VESC_COMMAND_SET_DUTY;
-        response.axes[1].set_value = msg->drill_movement;     //0x81
-    
         response.axes[2].command_id = VESC_COMMAND_SET_DUTY;
-        response.axes[2].set_value = msg->drill_action;     //0x82
-    
         response.servos[0].command_id = VESC_COMMAND_SET_POS;
-        response.servos[0].set_value = msg->container_degrees_0; //
-        
         response.servos[1].command_id = VESC_COMMAND_SET_POS;
-        response.servos[1].set_value = msg->container_degrees_1; //
-
         response.servos[2].command_id = VESC_COMMAND_SET_POS;
-        response.servos[2].set_value = msg->container_degrees_2; //
 
-        //auto response = std_msgs::msg::String();
-        //response.axes[0] = msg->drill_action;
+        if((currentDistance_ > lowerMovementLimit_ && msg->drill_movement+msg->platform_movement <= 0) ||
+           (currentDistance_ < upperMovementLimit_ && msg->drill_movement+msg->platform_movement >= 0) ||
+           currentDistance_ == 0.0f) //distance is 0.000000 so sensor is probably not connected
+        {
+            printf("Movement is within limits. Distance: %.2f\n", currentDistance_);
+            response.axes[0].set_value = msg->platform_movement;     //0x80
+        }
+        else
+        {
+            printf("Movement is out of limits, setting to zero. Distance: %.2f\n", currentDistance_);
+            response.axes[0].set_value = 0.0f; // platform movement stopped to prevent platform from hitting the ground
+        }
+        
+        response.axes[1].set_value = msg->drill_movement;   // 0x81
+        response.axes[2].set_value = msg->drill_action;     //0x82
+        
+        response.servos[0].set_value = msg->container_degrees_0; //
+        response.servos[1].set_value = msg->container_degrees_1; //
+        response.servos[2].set_value = msg->container_degrees_2; //
+        
+        response.header.stamp = msg->header.stamp;
         publisher_->publish(response);
+
+        show_requested_vs_published(msg, response);
     }
     
-    void sampler_status_callback(const rex_interfaces::msg::ProbeStatus::SharedPtr msg) const
+    void sampler_status_callback(const rex_interfaces::msg::ProbeStatus::SharedPtr msg)
     {
         printf("I received a message on sampler_status.\n");
         printf("Current distance is: %.2f.\n",
                msg->distance);
         
+        currentDistance_ = msg->distance;
     }
 
     void rover_status_callback(const rex_interfaces::msg::RoverStatus::SharedPtr msg) const
@@ -81,13 +91,34 @@ private:
         
     }
 
+    void show_requested_vs_published(const rex_interfaces::msg::ProbeControl::SharedPtr msg,
+                                    const rex_interfaces::msg::SamplerControl &response) const
+    {
+        printf("Requested:\tPublished:\nPM: %.2f\tPM: %.2f,\nDM: %.2f,\tDM: %.2f,\nDA: %.2f,\tDA: %.2f,\nS1: %.1f,\tS1: %.1f,\nS2: %.1f,\tS2: %.1f,\nS3: %.1f,\tS3: %.1f\n",
+               msg->platform_movement,
+               response.axes[0].set_value,
+               msg->drill_movement,
+               response.axes[1].set_value,
+               msg->drill_action,
+               response.axes[2].set_value,
+               msg->container_degrees_0,
+               response.servos[0].set_value,
+               msg->container_degrees_1,
+               response.servos[1].set_value,
+               msg->container_degrees_2,
+               response.servos[2].set_value
+               );
+    }
+
     rclcpp::Subscription    <rex_interfaces::msg::ProbeControl>     ::SharedPtr mqttSamplerControlSub_;
     rclcpp::Subscription    <rex_interfaces::msg::ProbeStatus>      ::SharedPtr mqttSamplerStatusSub_;
     rclcpp::Subscription    <rex_interfaces::msg::RoverStatus>      ::SharedPtr mqttRoverStatusSub_;
     rclcpp::Publisher       <rex_interfaces::msg::SamplerControl>   ::SharedPtr publisher_;
 
-    const float minDistance_ = 5.0f; // Distance (in cm) to the ground at which the sampler movement should be stopped
-    float distance_ = 100.0f;
+    const float lowerMovementLimit_ = 5.0f; 
+    const float upperMovementLimit_ = 100.0f;
+    const float safeServoDistance_ = 50.0f;
+    float currentDistance_ = 70.0f;
 
 };
 
