@@ -8,6 +8,7 @@
 #include "rex_interfaces/msg/probe_status.hpp"
 #include "rex_interfaces/msg/rover_status.hpp"
 #include "rex_interfaces/msg/sampler_control.hpp"
+#include "rex_interfaces/srv/sampler_set_generator.hpp"
 #include "libVescCan/VESC.h"
 
 class SamplerNode : public rclcpp::Node
@@ -34,6 +35,8 @@ public:
         publisher_ = this->create_publisher<rex_interfaces::msg::SamplerControl>(
             "/CAN/TX/sampler_control", 10
         );
+
+        client_ = this->create_client<rex_interfaces::srv::SamplerSetGenerator>("set_generator");
     }
 
 private:
@@ -72,6 +75,11 @@ private:
         response.header.stamp = msg->header.stamp;
         publisher_->publish(response);
 
+        auto request = std::make_shared<rex_interfaces::srv::SamplerSetGenerator::Request>();
+            request->response = response;
+
+        client_->async_send_request(request);
+
         show_requested_vs_published(msg, response);
     }
     
@@ -84,10 +92,24 @@ private:
         currentDistance_ = msg->distance;
     }
 
-    void rover_status_callback(const rex_interfaces::msg::RoverStatus::SharedPtr msg) const
+    void rover_status_callback(const rex_interfaces::msg::RoverStatus::SharedPtr msg)
     {
-        printf("I received a message on rover_status\n");
-        
+        printf("I received a message on rover_status, %i\n",
+               msg->control_mode);
+        if(msg->control_mode == currentControlMode)
+        {
+            printf("Control mode didn't change.\n");
+            currentControlMode = msg->control_mode;
+            return;
+        }
+        if(currentControlMode == 3 && msg->control_mode != 3)
+        {
+            printf("Control mode changed from sampler to something else.\n");
+            auto request = std::make_shared<rex_interfaces::srv::SamplerSetGenerator::Request>();
+            request->response = lastGoodResponse_;
+
+            client_->async_send_request(request);
+        }
     }
 
     void show_requested_vs_published(const rex_interfaces::msg::ProbeControl::SharedPtr msg,
@@ -123,21 +145,62 @@ private:
         }
         return platform_movement;
     }
-
-    rclcpp::Subscription    <rex_interfaces::msg::ProbeControl>     ::SharedPtr mqttSamplerControlSub_;
-    rclcpp::Subscription    <rex_interfaces::msg::ProbeStatus>      ::SharedPtr mqttSamplerStatusSub_;
-    rclcpp::Subscription    <rex_interfaces::msg::RoverStatus>      ::SharedPtr mqttRoverStatusSub_;
-    rclcpp::Publisher       <rex_interfaces::msg::SamplerControl>   ::SharedPtr publisher_;
-
+    
+    rclcpp::Client          <rex_interfaces::srv::SamplerSetGenerator>  ::SharedPtr client_;
+    rclcpp::Subscription    <rex_interfaces::msg::ProbeControl>         ::SharedPtr mqttSamplerControlSub_;
+    rclcpp::Subscription    <rex_interfaces::msg::ProbeStatus>          ::SharedPtr mqttSamplerStatusSub_;
+    rclcpp::Subscription    <rex_interfaces::msg::RoverStatus>          ::SharedPtr mqttRoverStatusSub_;
+    rclcpp::Publisher       <rex_interfaces::msg::SamplerControl>       ::SharedPtr publisher_;
+    
     const float lowerMovementLimit_ = 5.0f; 
     const float upperMovementLimit_ = 100.0f;
     const float safeServoDistance_ = 50.0f;
     float currentDistance_ = 70.0f;
+    int currentControlMode = 0;     //3 - sampler
 
     rex_interfaces::msg::SamplerControl lastGoodResponse_ = rex_interfaces::msg::SamplerControl();
 
 };
 
+class SamplerSignalGeneratorNode : public rclcpp::Node
+{
+public:
+    SamplerSignalGeneratorNode() : Node("timer_publisher")
+    {
+        publisher_ = this->create_publisher<rex_interfaces::msg::SamplerControl>(
+            "/CAN/TX/sampler_control", 10
+        );
+
+        timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(500),
+        std::bind(&SamplerSignalGeneratorNode::timer_callback, this)
+        );
+
+        service_ = this->create_service<rex_interfaces::srv::SamplerSetGenerator>(
+        "set_generator",
+        std::bind(&SamplerSignalGeneratorNode::on_service_called, this, std::placeholders::_1, std::placeholders::_2)
+        );
+    }
+
+private:
+    void timer_callback()
+    {
+        publisher_->publish(lastGoodResponse_);
+        printf("Published to CAN response.\n");
+    }
+    
+    void on_service_called(const std::shared_ptr<rex_interfaces::srv::SamplerSetGenerator::Request> request,
+        std::shared_ptr<rex_interfaces::srv::SamplerSetGenerator::Response> response)
+    {
+        lastGoodResponse_ = request->response;
+    }
+
+    rclcpp::Service         <rex_interfaces::srv::SamplerSetGenerator>  ::SharedPtr service_;
+    rclcpp::Publisher       <rex_interfaces::msg::SamplerControl>       ::SharedPtr publisher_;
+    rclcpp::TimerBase::SharedPtr timer_;
+
+    rex_interfaces::msg::SamplerControl lastGoodResponse_ = rex_interfaces::msg::SamplerControl();
+};
 
 int main(int argc, char *argv[])
 {
@@ -148,9 +211,11 @@ int main(int argc, char *argv[])
     printf("starting to spin");  
     
     auto controlNode = std::make_shared<SamplerNode>();
+    auto signalGeneratorNode = std::make_shared<SamplerSignalGeneratorNode>();
 
     rclcpp::executors::SingleThreadedExecutor exec;
     exec.add_node(controlNode);
+    exec.add_node(signalGeneratorNode);
     exec.spin();
 
     printf("I'm down\n");
