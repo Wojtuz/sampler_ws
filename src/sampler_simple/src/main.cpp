@@ -14,7 +14,7 @@ class SamplerNode : public rclcpp::Node
 {
 public:
     SamplerNode()
-    : Node("control_subscriber")
+    : Node("sampler_node")
     {
         mqttSamplerControlSub_ = this->create_subscription<rex_interfaces::msg::ProbeControl>(
             "/MQTT/SamplerControl", 10,
@@ -50,26 +50,25 @@ private:
         response.servos[1].command_id = VESC_COMMAND_SET_POS;
         response.servos[2].command_id = VESC_COMMAND_SET_POS;
 
-        if((currentDistance_ > lowerMovementLimit_ && msg->drill_movement+msg->platform_movement <= 0) ||
-           (currentDistance_ < upperMovementLimit_ && msg->drill_movement+msg->platform_movement >= 0) ||
-           currentDistance_ == 0.0f) //distance is 0.000000 so sensor is probably not connected
-        {
-            printf("Movement is within limits. Distance: %.2f\n", currentDistance_);
-            response.axes[0].set_value = msg->platform_movement;     //0x80
-        }
-        else
-        {
-            printf("Movement is out of limits, setting to zero. Distance: %.2f\n", currentDistance_);
-            response.axes[0].set_value = 0.0f; // platform movement stopped to prevent platform from hitting the ground
-        }
+        response.axes[0].set_value = handle_platform_movement(msg->platform_movement);     //0x80
         
         response.axes[1].set_value = msg->drill_movement;   // 0x81
         response.axes[2].set_value = msg->drill_action;     //0x82
         
-        response.servos[0].set_value = msg->container_degrees_0; //
-        response.servos[1].set_value = msg->container_degrees_1; //
-        response.servos[2].set_value = msg->container_degrees_2; //
-        
+        if(currentDistance_ > safeServoDistance_)
+        {
+            response.servos[0].set_value = msg->container_degrees_0; // 0x83
+            response.servos[1].set_value = msg->container_degrees_1; // 0x84
+            response.servos[2].set_value = msg->container_degrees_2; // 0x85
+        }
+        else
+        {
+            printf("Platform is too low to move servos. Using last good response.\n");
+            response.servos[0].set_value = lastGoodResponse_.servos[0].set_value; 
+            response.servos[1].set_value = lastGoodResponse_.servos[1].set_value;
+            response.servos[2].set_value = lastGoodResponse_.servos[2].set_value;
+        }
+
         response.header.stamp = msg->header.stamp;
         publisher_->publish(response);
 
@@ -94,7 +93,7 @@ private:
     void show_requested_vs_published(const rex_interfaces::msg::ProbeControl::SharedPtr msg,
                                     const rex_interfaces::msg::SamplerControl &response) const
     {
-        printf("Requested:\tPublished:\nPM: %.2f\tPM: %.2f,\nDM: %.2f,\tDM: %.2f,\nDA: %.2f,\tDA: %.2f,\nS1: %.1f,\tS1: %.1f,\nS2: %.1f,\tS2: %.1f,\nS3: %.1f,\tS3: %.1f\n",
+        printf("Requested:\tPublished:\nPM: %.2f\tPM: %.2f,\nDM: %.2f,\tDM: %.2f,\nDA: %.2f,\tDA: %.2f,\nS0: %.1f,\tS0: %.1f\nS1: %.1f,\tS1: %.1f,\nS2: %.1f,\tS2: %.1f,\n",
                msg->platform_movement,
                response.axes[0].set_value,
                msg->drill_movement,
@@ -110,6 +109,21 @@ private:
                );
     }
 
+    float handle_platform_movement(float platform_movement) const
+    {
+        if(currentDistance_ < lowerMovementLimit_ && platform_movement < 0)
+        {
+            printf("Platform movement prevented. Too low to move down.\n");
+            return 0;
+        }
+        if(currentDistance_ > upperMovementLimit_ && platform_movement > 0)
+        {
+            printf("Platform movement prevented. Too high to move up.\n");
+            return 0;
+        }
+        return platform_movement;
+    }
+
     rclcpp::Subscription    <rex_interfaces::msg::ProbeControl>     ::SharedPtr mqttSamplerControlSub_;
     rclcpp::Subscription    <rex_interfaces::msg::ProbeStatus>      ::SharedPtr mqttSamplerStatusSub_;
     rclcpp::Subscription    <rex_interfaces::msg::RoverStatus>      ::SharedPtr mqttRoverStatusSub_;
@@ -120,6 +134,8 @@ private:
     const float safeServoDistance_ = 50.0f;
     float currentDistance_ = 70.0f;
 
+    rex_interfaces::msg::SamplerControl lastGoodResponse_ = rex_interfaces::msg::SamplerControl();
+
 };
 
 
@@ -129,8 +145,13 @@ int main(int argc, char *argv[])
     
     printf("I'm up\n");
 
-    printf("starting to spin");
-    rclcpp::spin(std::make_shared<SamplerNode>());
+    printf("starting to spin");  
+    
+    auto controlNode = std::make_shared<SamplerNode>();
+
+    rclcpp::executors::SingleThreadedExecutor exec;
+    exec.add_node(controlNode);
+    exec.spin();
 
     printf("I'm down\n");
 
