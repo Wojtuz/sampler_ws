@@ -40,7 +40,7 @@ public:
 	}
 
 private:
-	void control_callback(const rex_interfaces::msg::ProbeControl::SharedPtr msg) const
+	void control_callback(const rex_interfaces::msg::ProbeControl::SharedPtr msg)
 	{
 		printf("I received a message\n");
 
@@ -73,7 +73,7 @@ private:
 		}
 
 		response.header.stamp = msg->header.stamp;
-		publisher_->publish(response);
+		lastGoodResponse_ = response;
 
 		auto request = std::make_shared<rex_interfaces::srv::SamplerSetGenerator::Request>();
 			request->response = response;
